@@ -24,22 +24,24 @@ int key_event[KEY_MAP_SIZE] = {0};
 uint8_t bt_key_map[KEY_LIMIT] = {0};
 uint8_t bt_key_map_last[KEY_LIMIT] = {0};
 
-unsigned int bounce_time = 10; //ms
+unsigned int bounce_time = 30; //ms
 unsigned int tap_expire_time = 500; //ms
 
 // uint8_t key_code_status_map[256] = {0};
 #define KEY_FN1 KEY_F13
 uint8_t key_code_map[5][13] = {
-    { KEY_LEFTCTRL, KEY_LEFTMETA, KEY_LEFTALT, KEY_SPACE, 0, 0, 0, KEY_FN1, KEY_LEFT, KEY_DOWN, KEY_RIGHT, KEY_BACKSLASH, KEY_BACKSPACE },
-    // { KEY_LEFTCTRL, KEY_LEFTMETA, KEY_LEFTALT, KEY_SPACE, 0, 0, 0, KEY_RIGHTALT, KEY_RIGHTMETA, KEY_PROPS, KEY_RIGHTCTRL, KEY_BACKSLASH, KEY_BACKSPACE },
-    { KEY_LEFTSHIFT, KEY_Z, KEY_X, KEY_C, KEY_V, KEY_B, KEY_N, KEY_M, KEY_COMMA, KEY_DOT, KEY_SLASH, KEY_UP },
-    // { KEY_LEFTSHIFT, KEY_Z, KEY_X, KEY_C, KEY_V, KEY_B, KEY_N, KEY_M, KEY_COMMA, KEY_DOT, KEY_SLASH, KEY_RIGHTSHIFT },
-    { KEY_GRAVE, KEY_A, KEY_S, KEY_D, KEY_F, KEY_G, KEY_H, KEY_J, KEY_K, KEY_L, KEY_SEMICOLON, KEY_APOSTROPHE, KEY_ENTER },
-    // { KEY_CAPSLOCK, KEY_A, KEY_S, KEY_D, KEY_F, KEY_G, KEY_H, KEY_J, KEY_K, KEY_L, KEY_SEMICOLON, KEY_APOSTROPHE, KEY_ENTER },
-    { KEY_TAB, KEY_Q, KEY_W, KEY_E, KEY_R, KEY_T, KEY_Y, KEY_U, KEY_I, KEY_O, KEY_P, KEY_LEFTBRACE, KEY_RIGHTBRACE },
-    { KEY_ESC, KEY_1, KEY_2, KEY_3, KEY_4, KEY_5, KEY_6, KEY_7, KEY_8, KEY_9, KEY_0, KEY_MINUS, KEY_EQUAL },
+    /*0*/// { KEY_LEFTCTRL, KEY_LEFTMETA, KEY_LEFTALT, KEY_SPACE, 0, 0, 0, KEY_RIGHTALT, KEY_RIGHTMETA, KEY_PROPS, KEY_RIGHTCTRL, KEY_BACKSLASH, KEY_BACKSPACE },
+    /*1*/// { KEY_LEFTSHIFT, KEY_Z, KEY_X, KEY_C, KEY_V, KEY_B, KEY_N, KEY_M, KEY_COMMA, KEY_DOT, KEY_SLASH, KEY_RIGHTSHIFT },
+    /*2*/// { KEY_CAPSLOCK, KEY_A, KEY_S, KEY_D, KEY_F, KEY_G, KEY_H, KEY_J, KEY_K, KEY_L, KEY_SEMICOLON, KEY_APOSTROPHE, KEY_ENTER },
+    /*0*/{ KEY_LEFTCTRL, KEY_LEFTMETA, KEY_LEFTALT, KEY_SPACE, 0, 0, 0, KEY_FN1, KEY_LEFT, KEY_DOWN, KEY_RIGHT, KEY_BACKSLASH, KEY_BACKSPACE },
+    /*1*/{ KEY_LEFTSHIFT, KEY_Z, KEY_X, KEY_C, KEY_V, KEY_B, KEY_N, KEY_M, KEY_COMMA, KEY_DOT, KEY_SLASH, KEY_UP },
+    /*2*/{ KEY_GRAVE, KEY_A, KEY_S, KEY_D, KEY_F, KEY_G, KEY_H, KEY_J, KEY_K, KEY_L, KEY_SEMICOLON, KEY_APOSTROPHE, KEY_ENTER },
+    /*3*/{ KEY_TAB, KEY_Q, KEY_W, KEY_E, KEY_R, KEY_T, KEY_Y, KEY_U, KEY_I, KEY_O, KEY_P, KEY_LEFTBRACE, KEY_RIGHTBRACE },
+    /*4*/{ KEY_ESC, KEY_1, KEY_2, KEY_3, KEY_4, KEY_5, KEY_6, KEY_7, KEY_8, KEY_9, KEY_0, KEY_MINUS, KEY_EQUAL },
 };
 
+int matrix_event[5][13];
+int matrix_last_event[5][13];
 
 #define MAX_KEYS_PER_KEYSTROKE 10
 // // #define MAX_KEYSTROKE_PER_CHORD 4
@@ -86,33 +88,25 @@ struct keystroke keystroke_map[] = {
 	// { .keys = { KEY_FN1, KEY_LEFTSHIFT, KEY_COMMA}, .result.function=dump_debug_status, .result_is_function=true}
 };
 size_t key_stroke_size = sizeof(keystroke_map) / sizeof(struct keystroke); 
-//dffsdfsd  ?
-int output_ports[] = {
-    26,
-    13,
-    12,
-    27,
-    33,
-    15,
-    32,
-    14,
-    23,
-    22,
-    16,
-    17,
-    21,
-};
-int output_port_count = sizeof(output_ports) / sizeof(int);
+
+const uint8_t register_clock = 23;
+const uint8_t register_latch = 22;
+const uint8_t register_data = 14;
 
 int input_ports[] = {
+    34,
     36,
-    4,
-    5,
-    18,
-    19
+    25,
+    39,//
+    26
 };
 int input_port_count = sizeof(input_ports) / sizeof(int);
 
+int row_remap[] = { 0, 2, 1, 4, 3 };
+int row_remap_count = sizeof(row_remap) / sizeof(int);
+
+int col_remap[] = { 5, 0, 9, 8, 6, 10, 11, 7, 12, 1, 4, 3, 2 };
+int col_remap_count = sizeof(col_remap) / sizeof(int);
 
 void typeText(const char* text);
 
@@ -122,15 +116,22 @@ void bt_send_update();
 void bluetoothTask(void*);
 void read_keys(void*);
 
-
 bool isBleConnected = false;
 
 void setup() {
-    Serial.begin(115200);
+    Serial.begin(9600);
+    // Serial.begin(115200);
 
-    for (int i; i < KEY_LIMIT; i++) {
+    for (int i=0; i < KEY_LIMIT; i++) {
         bt_key_map[i] = 0;
         bt_key_map_last[i] = 0;
+    }
+
+    for (int i=0; i < col_remap_count; i++) {
+        for (int j=0; j < 5; j++) {
+            matrix_event[j][i] = 0;
+            matrix_last_event[j][i] = 0;
+        }
     }
 
     xTaskCreate(read_keys, "read_keys", 5000, NULL, 4, NULL);
@@ -147,43 +148,94 @@ void read_keys(void *)
     for (int i=0;i<input_port_count;i++)
         pinMode(input_ports[i], INPUT);
 
-    for (int i=0;i<output_port_count;i++)
-        pinMode(output_ports[i], OUTPUT); 
+    pinMode(register_clock, OUTPUT); 
+    pinMode(register_latch, OUTPUT); 
+    pinMode(register_data, OUTPUT); 
 
     Serial.println("Starting key read main task");
     
     bool function_latch = true;
+    for (int i=0; i < 30; i++){
+        digitalWrite(register_data, LOW);
+        digitalWrite(register_clock, HIGH);
+        digitalWrite(register_clock, LOW);
+    }
+    digitalWrite(register_latch, HIGH);
+    digitalWrite(register_latch, LOW);
 
     for (;;)
     {
+       
+        for (int i=0; i < 13; i++){
 
-        for (int i=0;i<output_port_count;i++){
-            for (int j=0;j<input_port_count;j++) {
-                uint8_t keycode = key_code_map[j][i];
-                digitalWrite(output_ports[i], HIGH);
-                // Reset event mappings for keys that haven't been used in a while
-                if (key_event[keycode] != 0) {
-                    if (millis() - key_last_event_time[keycode] > tap_expire_time  && key_event[keycode] % 2 == LOW) {
-                        key_event[keycode] = digitalRead(input_ports[j]);
-                    }
-                }
+            // Serial.printf("%d\n", i);
 
-                // Detect key state changes and update the event map
-                if (millis() - key_last_event_time[keycode] > bounce_time  && key_event[keycode] % 2 != digitalRead(input_ports[j])) {
-                    key_event[keycode]++;
-                    key_last_event_time[keycode] = millis();
-                }
+            digitalWrite(register_latch, LOW);
+            if (i == 0) digitalWrite(register_data, HIGH);
+            else        digitalWrite(register_data, LOW);
+            digitalWrite(register_clock, HIGH); 
+            digitalWrite(register_clock, LOW);
 
-                digitalWrite(output_ports[i], LOW);
-            }
+            digitalWrite(register_latch, HIGH);
+            digitalWrite(register_latch, LOW);
+            digitalWrite(register_data, LOW);
+            
+            // delay(1000);
         }
 
+        for (int i=0; i < (16-13); i++){
+        digitalWrite(register_latch, LOW);
+            digitalWrite(register_data, LOW);
+            digitalWrite(register_clock, HIGH);
+            digitalWrite(register_clock, LOW);
+        digitalWrite(register_latch, HIGH);
+        digitalWrite(register_latch, LOW);
+        }
+
+        // for (int i=0; i < 13; i++){
+
+        //     if (i == 0) digitalWrite(register_data, HIGH);
+        //     else        digitalWrite(register_data, LOW);
+            
+        //     digitalWrite(register_clock, HIGH);
+        //     digitalWrite(register_latch, HIGH);
+            
+        //     digitalWrite(register_clock, LOW);
+        //     digitalWrite(register_latch, LOW);
+
+        //     digitalWrite(register_data, LOW);
+            
+        //     for (int j=0;j<input_port_count;j++) {
+        //         // uint8_t keycode = key_code_map[j][i];
+        //         uint8_t keycode = key_code_map[col_remap[i]][row_remap[j]];
+                
+        //         // Reset event mappings for keys that haven't been used in a while
+        //         if (matrix_event[j][i] != 0) {
+        //         // if (key_event[keycode] != 0) {
+        //             if (millis() - matrix_last_event[j][i] > tap_expire_time  && matrix_event[j][i] % 2 == LOW) {
+        //             // if (millis() - key_last_event_time[keycode] > tap_expire_time  && key_event[keycode] % 2 == LOW) {
+        //                 matrix_event[j][i] = digitalRead(input_ports[j]);
+        //                 // key_event[keycode] = digitalRead(input_ports[j]);
+        //             }
+        //         }
+
+        //         // Detect key state changes and update the event map
+        //         if (millis() - matrix_last_event[j][i] > bounce_time  && matrix_event[j][i] % 2 != digitalRead(input_ports[j])) {
+        //         // if (millis() - key_last_event_time[keycode] > bounce_time  && key_event[keycode] % 2 != digitalRead(input_ports[j])) {
+        //             Serial.printf("%d\t[%d][%d]\t%d\n", keycode, col_remap[i], row_remap[j], millis() - matrix_last_event[j][i]);
+        //             // Serial.printf("%d\t[%d][%d] remaps to %d\t[%d][%d]\n", keycode, i, j, remap_key, col_remap[i], row_remap[j]);
+        //             // key_event[keycode]++;
+        //             // key_last_event_time[keycode] = millis();
+        //             matrix_event[j][i]++;
+        //             matrix_last_event[j][i] = millis();
+        //         }
+        //     }
+        // }
 
         // Reset buttons that are no longer held 
         for (int i = 0; i < KEY_LIMIT; i++) {
             bt_key_map[i] = 0;
         }
-
 
         int any_stroke_triggered = 0;
         // Detect keystrokes before trying to send anything over BT
@@ -229,10 +281,13 @@ void read_keys(void *)
         }
 
         if ( send_update ) {
+            Serial.println("sending update");
             for (int i = 0; i < KEY_LIMIT; i++) {
+                Serial.printf("%d ", bt_key_map[i]);
                 bt_key_map_last[i] = bt_key_map[i];
             }
-            bt_send_update();
+            Serial.println();
+            // bt_send_update();
         }
         
         delay(1);
@@ -312,8 +367,6 @@ class BleKeyboardCallbacks : public BLEServerCallbacks {
 
         Serial.println("Client has connected");
     }
-
-
 
     void onDisconnect(BLEServer* server) {
         isBleConnected = false;
