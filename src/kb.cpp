@@ -88,28 +88,31 @@ struct keystroke keystroke_map[] = {
 size_t key_stroke_size = sizeof(keystroke_map) / sizeof(struct keystroke); 
 //dffsdfsd  ?
 int output_ports[] = {
-    26,
-    13,
-    12,
-    27,
-    33,
-    15,
-    32,
-    14,
-    23,
-    22,
-    16,
-    17,
-    21,
+    26,//
+    27,//
+    13,//
+    23,//
+    12,//
+    22,//
+    14,//
+    17,//
+    21,//
+    16,//
+    15,//
+    33,//qqqqqqqqqqqqqqqqqqqqqqqqqqqqq
+    32,//
 };
+
+// 
+
 int output_port_count = sizeof(output_ports) / sizeof(int);
 
 int input_ports[] = {
-    36,
-    4,
     5,
+    4,
+    19,
+    36,
     18,
-    19
 };
 int input_port_count = sizeof(input_ports) / sizeof(int);
 
@@ -122,11 +125,11 @@ void bt_send_update();
 void bluetoothTask(void*);
 void read_keys(void*);
 
-
 bool isBleConnected = false;
 
 void setup() {
-    Serial.begin(115200);
+    Serial.begin(9600);
+    // Serial.begin(115200);
 
     for (int i; i < KEY_LIMIT; i++) {
         bt_key_map[i] = 0;
@@ -172,6 +175,7 @@ void read_keys(void *)
                 if (millis() - key_last_event_time[keycode] > bounce_time  && key_event[keycode] % 2 != digitalRead(input_ports[j])) {
                     key_event[keycode]++;
                     key_last_event_time[keycode] = millis();
+                    Serial.println(i);
                 }
 
                 digitalWrite(output_ports[i], LOW);
