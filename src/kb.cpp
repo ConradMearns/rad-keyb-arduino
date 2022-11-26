@@ -12,14 +12,16 @@
 #include "MightyPork.h"
 // #include "HIDKeyboardTypes.h"
 
+const int MAX_ANALOG_VAL = 4095;
+const float MAX_BATTERY_VOLTAGE = 4.2; // Max LiPoly voltage of a 3.7 battery is 4.2
 
-#define DEVICE_NAME "Rad Keyboard"
+#define DEVICE_NAME "RAD康 Keyboard"
 
 #define KEY_MAP_SIZE 256
 #define KEY_LIMIT 6 // Set by Bluetooth HID limit
 
-// unsigned long key_last_event_time[KEY_MAP_SIZE] = {0};
-// int key_event[KEY_MAP_SIZE] = {0};
+unsigned long key_last_event_time[KEY_MAP_SIZE] = {0};
+int key_event[KEY_MAP_SIZE] = {0};
 
 uint8_t bt_key_map[KEY_LIMIT] = {0};
 uint8_t bt_key_map_last[KEY_LIMIT] = {0};
@@ -30,14 +32,14 @@ unsigned int tap_expire_time = 500; //ms
 // uint8_t key_code_status_map[256] = {0};
 #define KEY_FN1 KEY_F13
 uint8_t key_code_map[5][13] = {
-    /*0*/// { KEY_LEFTCTRL, KEY_LEFTMETA, KEY_LEFTALT, KEY_SPACE, 0, 0, 0, KEY_RIGHTALT, KEY_RIGHTMETA, KEY_PROPS, KEY_RIGHTCTRL, KEY_BACKSLASH, KEY_BACKSPACE },
-    /*1*/// { KEY_LEFTSHIFT, KEY_Z, KEY_X, KEY_C, KEY_V, KEY_B, KEY_N, KEY_M, KEY_COMMA, KEY_DOT, KEY_SLASH, KEY_RIGHTSHIFT },
-    /*2*/// { KEY_CAPSLOCK, KEY_A, KEY_S, KEY_D, KEY_F, KEY_G, KEY_H, KEY_J, KEY_K, KEY_L, KEY_SEMICOLON, KEY_APOSTROPHE, KEY_ENTER },
-    /*0*/{ KEY_LEFTCTRL, KEY_LEFTMETA, KEY_LEFTALT, KEY_SPACE, 0, 0, 0, KEY_FN1, KEY_LEFT, KEY_DOWN, KEY_RIGHT, KEY_BACKSLASH, KEY_BACKSPACE },
-    /*1*/{ KEY_LEFTSHIFT, KEY_Z, KEY_X, KEY_C, KEY_V, KEY_B, KEY_N, KEY_M, KEY_COMMA, KEY_DOT, KEY_SLASH, KEY_UP },
-    /*2*/{ KEY_GRAVE, KEY_A, KEY_S, KEY_D, KEY_F, KEY_G, KEY_H, KEY_J, KEY_K, KEY_L, KEY_SEMICOLON, KEY_APOSTROPHE, KEY_ENTER },
-    /*3*/{ KEY_TAB, KEY_Q, KEY_W, KEY_E, KEY_R, KEY_T, KEY_Y, KEY_U, KEY_I, KEY_O, KEY_P, KEY_LEFTBRACE, KEY_RIGHTBRACE },
-    /*4*/{ KEY_ESC, KEY_1, KEY_2, KEY_3, KEY_4, KEY_5, KEY_6, KEY_7, KEY_8, KEY_9, KEY_0, KEY_MINUS, KEY_EQUAL },
+    // { KEY_LEFTCTRL, KEY_LEFTMETA, KEY_LEFTALT, KEY_SPACE, 0, 0, 0, KEY_RIGHTALT, KEY_RIGHTMETA, KEY_PROPS, KEY_RIGHTCTRL, KEY_BACKSLASH, KEY_BACKSPACE },
+    // { KEY_LEFTSHIFT, KEY_Z, KEY_X, KEY_C, KEY_V, KEY_B, KEY_N, KEY_M, KEY_COMMA, KEY_DOT, KEY_SLASH, KEY_RIGHTSHIFT },
+    // { KEY_CAPSLOCK, KEY_A, KEY_S, KEY_D, KEY_F, KEY_G, KEY_H, KEY_J, KEY_K, KEY_L, KEY_SEMICOLON, KEY_APOSTROPHE, KEY_ENTER },
+    { KEY_ESC, KEY_1, KEY_2, KEY_3, KEY_4, KEY_5, KEY_6, KEY_7, KEY_8, KEY_9, KEY_0, KEY_MINUS, KEY_EQUAL },
+    { KEY_TAB, KEY_Q, KEY_W, KEY_E, KEY_R, KEY_T, KEY_Y, KEY_U, KEY_I, KEY_O, KEY_P, KEY_LEFTBRACE, KEY_RIGHTBRACE },
+    { KEY_GRAVE, KEY_A, KEY_S, KEY_D, KEY_F, KEY_G, KEY_H, KEY_J, KEY_K, KEY_L, KEY_SEMICOLON, KEY_APOSTROPHE, KEY_ENTER },
+    { KEY_LEFTSHIFT, KEY_Z, KEY_X, KEY_C, KEY_V, KEY_B, KEY_N, KEY_M, KEY_COMMA, KEY_DOT, KEY_SLASH, KEY_UP },
+    { KEY_LEFTCTRL, KEY_LEFTMETA, KEY_LEFTALT, KEY_SPACE, 0, 0, 0, KEY_FN1, KEY_LEFT, KEY_DOWN, KEY_RIGHT, KEY_BACKSLASH, KEY_BACKSPACE },
 };
 
 int matrix_event[5][13];
@@ -93,20 +95,18 @@ const uint8_t register_clock = 23;
 const uint8_t register_latch = 22;
 const uint8_t register_data = 14;
 
-int input_ports[] = {
-    34,
-    36,
-    25,
-    39,//
-    26
-};
+int input_ports[] = { 25, 26, 34, 36, 39 };
 int input_port_count = sizeof(input_ports) / sizeof(int);
 
-int row_remap[] = { 0, 2, 1, 4, 3 };
+int row_remap[] = { 3, 1, 4, 2, 0 };
 int row_remap_count = sizeof(row_remap) / sizeof(int);
 
-int col_remap[] = { 5, 0, 9, 8, 6, 10, 11, 7, 12, 1, 4, 3, 2 };
+int col_remap[] = { 0, 9, 8, 6, 10, 11, 7, 12, 1, 4, 3, 2, 5 };
+// int col_remap[] = { 5, 0, 9, 8, 6, 10, 11, 7, 12, 1, 4, 3, 2 };
 int col_remap_count = sizeof(col_remap) / sizeof(int);
+
+int global_ro_battery_level = 0;
+int battery_adc_port = A13;
 
 void typeText(const char* text);
 
@@ -115,6 +115,7 @@ void bt_send_update();
 // Tasks
 void bluetoothTask(void*);
 void read_keys(void*);
+void read_battery_level(void*);
 
 bool isBleConnected = false;
 
@@ -125,6 +126,9 @@ void setup() {
     for (int i=0; i < KEY_LIMIT; i++) {
         bt_key_map[i] = 0;
         bt_key_map_last[i] = 0;
+
+        key_event[i] = 0;
+        key_last_event_time[i] = 0;
     }
 
     for (int i=0; i < col_remap_count; i++) {
@@ -133,12 +137,37 @@ void setup() {
             matrix_last_event[j][i] = 0;
         }
     }
+    
+    pinMode(battery_adc_port, INPUT);
 
     xTaskCreate(read_keys, "read_keys", 5000, NULL, 4, NULL);
     xTaskCreate(bluetoothTask, "bluetooth", 20000, NULL, 5, NULL);
+    xTaskCreate(read_battery_level, "read_battery_level", 5000, NULL, 4, NULL);
 }
 
 void loop() {}
+
+void read_battery_level(void *)
+{
+    TickType_t seconds = 60;
+    TickType_t delay = (1000 * seconds) / portTICK_RATE_MS;
+    for (;;) {
+
+        int rawValue = analogRead(battery_adc_port);
+
+        // Reference voltage on ESP32 is 1.1V
+        // https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/peripherals/adc.html#adc-calibration
+        // See also: https://bit.ly/2zFzfMT
+        float voltageLevel = (rawValue / 4095.0) * 2 * 1.1 * 3.3; // calculate voltage level
+        float batteryFraction = voltageLevel / MAX_BATTERY_VOLTAGE;
+
+        Serial.println((String) "Battery Power | Raw:" + rawValue + " Voltage:" + voltageLevel + "V Percent: " + (batteryFraction * 100) + "%");
+
+        global_ro_battery_level = (int) (batteryFraction * 100);
+
+        vTaskDelay(delay);
+    }
+}
 
 void read_keys(void *)
 {
@@ -207,7 +236,8 @@ void read_keys(void *)
             
             for (int j=0;j<input_port_count;j++) {
                 // uint8_t keycode = key_code_map[j][i];
-                uint8_t keycode = key_code_map[col_remap[i]][row_remap[j]];
+                // uint8_t keycode = key_code_map[col_remap[i]][row_remap[j]];
+                uint8_t keycode = key_code_map[row_remap[j]][col_remap[i]];
                 
                 // Reset event mappings for keys that haven't been used in a while
                 if (matrix_event[j][i] != 0) {
@@ -215,17 +245,17 @@ void read_keys(void *)
                     if (millis() - matrix_last_event[j][i] > tap_expire_time  && matrix_event[j][i] % 2 == LOW) {
                     // if (millis() - key_last_event_time[keycode] > tap_expire_time  && key_event[keycode] % 2 == LOW) {
                         matrix_event[j][i] = digitalRead(input_ports[j]);
-                        // key_event[keycode] = digitalRead(input_ports[j]);
+                        key_event[keycode] = digitalRead(input_ports[j]);
                     }
                 }
 
                 // Detect key state changes and update the event map
                 if (millis() - matrix_last_event[j][i] > bounce_time  && matrix_event[j][i] % 2 != digitalRead(input_ports[j])) {
                 // if (millis() - key_last_event_time[keycode] > bounce_time  && key_event[keycode] % 2 != digitalRead(input_ports[j])) {
-                    Serial.printf("%d\t[%d][%d]\t%d\n", keycode, col_remap[i], row_remap[j], millis() - matrix_last_event[j][i]);
-                    // Serial.printf("%d\t[%d][%d] remaps to %d\t[%d][%d]\n", keycode, i, j, remap_key, col_remap[i], row_remap[j]);
-                    // key_event[keycode]++;
-                    // key_last_event_time[keycode] = millis();
+                    // Serial.printf("%d\t[%d][%d]\t%d\n", keycode, col_remap[i], row_remap[j], millis() - matrix_last_event[j][i]);
+                    // Serial.printf("%d\t[%d][%d] remaps to %d\t[%d][%d]\n", keycode, i, j, remap_key, col_remap[i], row_remap[j]); //TODO whats remap key?
+                    key_event[keycode]++;
+                    key_last_event_time[keycode] = millis();
                     matrix_event[j][i]++;
                     matrix_last_event[j][i] = millis();
                 }
@@ -404,6 +434,10 @@ class BleKeyboardCallbacks : public BLEServerCallbacks {
 
 void bluetoothTask(void*) {
 
+    TickType_t seconds = 60;
+    TickType_t delay = (1000 * seconds) / portTICK_RATE_MS;
+
+
     // initialize the device
     BLEDevice::init(DEVICE_NAME);
     BLEServer* server = BLEDevice::createServer();
@@ -431,7 +465,7 @@ void bluetoothTask(void*) {
     hid->startServices();
 
     // set battery level to 100%
-    hid->setBatteryLevel(101);
+    hid->setBatteryLevel(10);
 
     // advertise the services
     BLEAdvertising* advertising = server->getAdvertising();
@@ -441,12 +475,16 @@ void bluetoothTask(void*) {
     advertising->addServiceUUID(hid->batteryService()->getUUID());
     advertising->start();
 
-    Serial.println("BLE ready"); 
-    delay(portMAX_DELAY);
+    Serial.println("BLE ready");
+    for (;;) {
+        hid->setBatteryLevel(global_ro_battery_level);
+        vTaskDelay(delay);
+    }
+    // delay(portMAX_DELAY);
 };
 
 void bt_send_update() {
-    Serial.println("Trying to send update");
+    // Serial.println("Trying to send update");
     if (!isBleConnected) return;
 
     uint8_t mods =
